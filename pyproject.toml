@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ailura"
+version = "0.1.0"
+description = "Ailura Multi-Quant Agent: a multi-agent LLM trading research framework (TradingAgents re-implementation with quant improvements)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+dependencies = [
+  "pydantic>=2.5",
+  "pandas>=2.0",
+  "numpy>=1.24",
+  "typer>=0.12",
+  "rich>=13.0",
+]
+
+[project.optional-dependencies]
+anthropic = ["anthropic>=1.0"]
+openai = ["openai>=1.40"]
+yfinance = ["yfinance>=0.2.40"]
+dev = ["pytest>=8.0", "ruff>=0.5", "pytest-cov>=5.0"]
+all = ["ailura[anthropic,openai,yfinance,dev]"]
+
+[project.scripts]
+ailura = "ailura.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["ailura*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501", "B008"]  # B008: typer.Option defaults are the idiom
