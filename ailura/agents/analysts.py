@@ -24,7 +24,11 @@ class MarketAnalyst(Agent[AnalystReport]):
         "(moving averages, MACD, RSI, Bollinger, ATR, VWMA, KDJ, z-score, realized vol, "
         "60-day support/resistance) and the last bars. Select the most informative, "
         "non-redundant indicators, describe trend, momentum, volatility regime and key "
-        "levels, and give a stance with a signed score. Set analyst='market'."
+        "levels, and give a stance with a signed score. Take direction from mom_12_1 / mom_6_1 "
+        "(momentum that skips the latest month) and the trend, NOT from the last few days: RSI, "
+        "MACD histogram and ret_5d describe what already happened. Use them for entry_timing "
+        "only; a sharp move in the trend's direction means wait for a pullback, not chase. "
+        "Set analyst='market'."
     )
 
     def build_context(self, state: TradingState) -> dict[str, Any]:
@@ -42,7 +46,11 @@ class NewsAnalyst(Agent[AnalystReport]):
     system_prompt = (
         "You are the News Analyst. Read the recent company and macro headlines, weigh their "
         "materiality and recency, and summarise the likely impact on the stock over the next "
-        "1-4 weeks. Distinguish confirmed facts from speculation. Set analyst='news'."
+        "1-4 weeks. Distinguish confirmed facts from speculation. Most headlines report a move "
+        "that already happened: compare the news with the price reaction already seen "
+        "(ret_5d, stretch_5d = last week's move in units of its normal size). Good news after a "
+        "big rally is priced in, not bullish; score only the part the price has NOT yet "
+        "reflected. Set analyst='news'."
     )
 
     def build_context(self, state: TradingState) -> dict[str, Any]:
@@ -52,6 +60,8 @@ class NewsAnalyst(Agent[AnalystReport]):
             "date": str(state.trade_date),
             "news_count": len(state.news),
             "avg_sentiment": round(float(np.mean(sents)), 4) if sents else None,
+            "ret_5d": state.features.get("ret_5d"),
+            "stretch_5d": state.features.get("stretch_5d"),
             "news": state.news[:25],
         }
 
@@ -61,8 +71,9 @@ class SentimentAnalyst(Agent[AnalystReport]):
     schema = AnalystReport
     system_prompt = (
         "You are the Social Sentiment Analyst. Assess the mood of retail and social media "
-        "discussion, engagement-weighted, and whether it is a contrarian or confirming "
-        "signal given the price action. Set analyst='sentiment'."
+        "discussion, engagement-weighted. Crowd mood mostly echoes the last move (see ret_5d and "
+        "stretch_5d): score only mood the price action does not already explain, in either "
+        "direction. Neither chase nor reflexively fade it. Set analyst='sentiment'."
     )
 
     def build_context(self, state: TradingState) -> dict[str, Any]:
@@ -78,6 +89,7 @@ class SentimentAnalyst(Agent[AnalystReport]):
             "engagement_weighted_sentiment": round(weighted, 4) if weighted is not None else None,
             "sample_posts": posts[:20],
             "ret_5d": state.features.get("ret_5d"),
+            "stretch_5d": state.features.get("stretch_5d"),
         }
 
 

@@ -123,6 +123,7 @@ def test_min_hold_blocks_weak_exit_but_not_strong_sell(config):
 def test_trend_guard_caps_longs_in_downtrend(config):
     from ailura.graph.orchestrator import apply_position_rules
 
+    config = config.model_copy(update={"trend_guard": True})  # opt-in
     buy = FinalDecision(rating="Buy", action="BUY", conviction=0.8, position_fraction=0.9, executive_summary="s", thesis="t")
     d = apply_position_rules(buy, PortfolioContext(), {"trend_regime": "downtrend"}, config)
     assert d.position_fraction == config.downtrend_max_fraction

@@ -72,7 +72,7 @@ def backtest(
     llm: str = typer.Option(None),
     rebalance_every: int = typer.Option(1, help="run the agents every N trading days"),
     sizing: str = typer.Option("conviction", help="conviction | binary"),
-    execution: str = typer.Option("next_close", help="next_close (realistic: trade the day after the decision) | close"),
+    execution: str = typer.Option("close", help="close (trade at the decision close) | next_close (one day later, conservative)"),
     with_baselines: bool = typer.Option(True, help="also run the paper's baselines"),
     out: Path = typer.Option(None, help="write results JSON here"),
 ) -> None:
@@ -123,7 +123,7 @@ def baselines(
     start: str = typer.Option(...),
     end: str = typer.Option(...),
     provider: str = typer.Option(None),
-    execution: str = typer.Option("next_close", help="next_close | close"),
+    execution: str = typer.Option("close", help="close | next_close"),
 ) -> None:
     """Run only the paper's five baseline strategies."""
     from ailura.backtest import BASELINES, Backtester, ExecutionConfig

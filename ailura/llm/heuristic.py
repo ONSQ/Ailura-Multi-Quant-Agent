@@ -109,27 +109,31 @@ class HeuristicLLM:
     def news_analyst(self, c: dict[str, Any]) -> AnalystReport:
         s = c.get("avg_sentiment")
         n = int(c.get("news_count") or 0)
-        score = _clip(float(s) if s is not None else 0.0)
+        # headlines mostly describe the move that already happened: score only the surprise
+        stretch = float(c.get("stretch_5d") or 0.0)
+        priced_in = _clip(stretch / 2)
+        score = _clip((float(s) - 0.9 * priced_in) if s is not None else 0.0)
         sig = [Signal(name="headline count", value=str(n), interpretation="news flow intensity")]
         if s is not None:
             sig.append(Signal(name="avg headline sentiment", value=f"{s:+.2f}", interpretation="net positive coverage" if s > 0.15 else "net negative coverage" if s < -0.15 else "mixed coverage", direction=_stance(score)))
         for item in (c.get("news") or [])[:3]:
             sig.append(Signal(name="headline", value=item.get("headline", "")[:80], interpretation=item.get("summary", "")[:100], direction=_stance(float(item.get("sentiment") or 0))))
         dq = 1.0 if n >= 3 else n / 3
-        return AnalystReport(analyst="news", summary=f"{n} headlines in window; average sentiment {s}. Coverage is {_stance(score)}.", signals=sig, stance=_stance(score), score=score, confidence=_clip(0.3 + 0.4 * dq, 0, 1), data_quality=dq)
+        return AnalystReport(analyst="news", summary=f"{n} headlines in window; average sentiment {s}; {priced_in:+.2f} of it already priced in by last week's move. Net news signal is {_stance(score)}.", signals=sig, stance=_stance(score), score=score, confidence=_clip(0.3 + 0.4 * dq, 0, 1), data_quality=dq)
 
     def sentiment_analyst(self, c: dict[str, Any]) -> AnalystReport:
         w = c.get("engagement_weighted_sentiment")
         n = int(c.get("post_count") or 0)
         r5 = c.get("ret_5d")
         raw = float(w) if w is not None else 0.0
-        # crowd extremes after a big move are treated as contrarian
+        # crowd mood mostly echoes the last move; score only the part the move doesn't explain
+        priced_in = _clip(float(c.get("stretch_5d") or 0.0) / 2)
         contrarian = r5 is not None and abs(raw) > 0.6 and np.sign(raw) == np.sign(r5) and abs(r5) > 0.05
-        score = _clip(-0.5 * raw if contrarian else 0.7 * raw)
+        score = _clip(0.7 * (raw - 1.0 * priced_in))
         sig = [Signal(name="posts", value=str(n), interpretation="discussion volume"),
                Signal(name="engagement-weighted sentiment", value=f"{raw:+.2f}", interpretation="crowd euphoric, contrarian fade" if contrarian and raw > 0 else "crowd capitulating, contrarian buy" if contrarian else "crowd mood", direction=_stance(score))]
         dq = 1.0 if n >= 10 else n / 10
-        return AnalystReport(analyst="sentiment", summary=f"{n} posts; engagement-weighted sentiment {raw:+.2f}; {'contrarian' if contrarian else 'confirming'} read vs 5-day return {r5}.", signals=sig, stance=_stance(score), score=score, confidence=_clip(0.25 + 0.35 * dq, 0, 1), data_quality=dq)
+        return AnalystReport(analyst="sentiment", summary=f"{n} posts; engagement-weighted sentiment {raw:+.2f}; {'crowd extreme after a big move' if contrarian else 'ordinary mood'} vs 5-day return {r5}; {priced_in:+.2f} already priced in.", signals=sig, stance=_stance(score), score=score, confidence=_clip(0.25 + 0.35 * dq, 0, 1), data_quality=dq)
 
     def fundamentals_analyst(self, c: dict[str, Any]) -> AnalystReport:
         m = (c.get("fundamentals") or {}).get("metrics") or {}

@@ -37,7 +37,7 @@ position limits, stop on the right side of price).
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"            # core: pydantic, pandas, numpy, typer, rich
-pytest                             # 41 offline, deterministic tests
+pytest                             # 43 offline, deterministic tests
 
 # One decision, fully offline (synthetic data + deterministic heuristic "LLM")
 ailura analyze AAPL --date 2024-03-01
@@ -84,7 +84,7 @@ All fields of `AiluraConfig` (`ailura/config.py`) can be set with
 | `holding_days` | 5 | window used to settle a decision and write a lesson |
 | `target_annual_vol` / `max_position_fraction` / `allow_short` | 0.20 / 1.0 / false | sizing limits handed to the trader and risk team |
 | `min_hold_days` | 3 | an open position isn't cut/reversed this soon unless \|conviction\| ≥ 0.6 |
-| `trend_guard` / `downtrend_max_fraction` | true / 0.5 | cap long size while SMA50 < SMA200 (caps size, never creates a signal) |
+| `trend_guard` / `downtrend_max_fraction` | false / 0.5 | cap long size while SMA50 < SMA200 (caps size, never creates a signal) |
 | `commission_bps` / `slippage_bps` | 1 / 2 | backtest costs |
 | `llm_knowledge_cutoff` | unset | model training cutoff; real-LLM backtests starting before it get a warning |
 | `memory_path` | `.ailura/memory.jsonl` | decision log; `None` for in-memory |
@@ -98,13 +98,22 @@ arXiv:2602.18481) and from upstream TradingAgents issues (#203, #1170, #1466):
 * **HOLD keeps the position.** It is never an exit; close a long with
   Underweight/Sell. (Treating HOLD as "go flat" made the book flip long↔cash
   on tiny conviction changes.)
+* **Lead, don't chase.** Direction comes from 12-1 and 6-1 momentum
+  (`mom_12_1`, `mom_6_1`: the trend measured *skipping the latest month*).
+  RSI, MACD histogram and the 5-day move only set `entry_timing`; a sharp move
+  in the trend's direction halves the score ("wait for a pullback"). News and
+  social sentiment are scored net of what last week's move already priced in
+  (`stretch_5d`). Before this, conviction tracked the *previous* week's return
+  (corr 0.57) and the news score was 0.74 correlated with it: the pipeline was
+  narrating moves after they happened.
 * **Hysteresis outside the LLM.** LLM agents flip between adjacent decisions
-  even at temperature 0. A minimum holding period, a 5% rebalance band and a
-  trend guard are enforced in code (`apply_position_rules`); overrides are
-  tagged in the executive summary and counted in the backtest's `decisions:`
-  line, next to the BUY/HOLD/SELL base rates and position flips.
-* **Realistic fills.** `ailura backtest` executes on the next close by
-  default (`--execution close` for the paper's optimistic convention).
+  even at temperature 0. A minimum holding period is enforced in code
+  (`apply_position_rules`); an opt-in trend guard (`AILURA_TREND_GUARD`) caps
+  longs in downtrends. Overrides are tagged in the executive summary and
+  counted in the backtest's `decisions:` line, next to the BUY/HOLD/SELL base
+  rates and position flips.
+* **Fill timing.** `--execution next_close` trades a day after the decision
+  (conservative); the default `close` matches the paper.
 * **No future fundamentals.** Yahoo fundamentals are present-day only and are
   withheld for historical dates; live runs refresh a stale cache and ignore a
   partial intraday bar.

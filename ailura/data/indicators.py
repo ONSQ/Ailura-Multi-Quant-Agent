@@ -141,15 +141,37 @@ def snapshot(df: pd.DataFrame) -> dict[str, Any]:
     feats["resistance_60d"] = round(hi_60, 4)
     feats["pct_from_high_60d"] = round(close / hi_60 - 1, 6)
 
-    # Composite technical score in [-1, 1]: trend, momentum, mean reversion, MACD.
-    parts: list[float] = []
-    if feats["sma_20"] and feats["sma_50"]:
-        parts.append(float(np.clip((feats["sma_20"] / feats["sma_50"] - 1) * 20, -1, 1)))
-    if feats["rsi_14"] is not None:
-        parts.append(float(np.clip((feats["rsi_14"] - 50) / 25, -1, 1)))
-    if feats["hist"] is not None and feats["atr_14"]:
-        parts.append(float(np.clip(feats["hist"] / feats["atr_14"] * 2, -1, 1)))
-    if feats["zscore_20"] is not None:
-        parts.append(float(np.clip(-feats["zscore_20"] / 2.5, -1, 1)) * 0.5)  # mild mean-reversion
-    feats["technical_score"] = round(float(np.mean(parts)) if parts else 0.0, 4)
+    # Composite technical score in [-1, 1], built to lead rather than lag.
+    # Direction comes from intermediate-term momentum that SKIPS the latest month
+    # (12-1 and 6-1, vol-scaled): the most robust trend signal in the literature,
+    # and blind to the move that just happened. Short-term oscillators (RSI, MACD
+    # histogram, 5-day return) only describe what already happened, so they are
+    # used for timing: a sharp move in the signal's direction means "wait for a
+    # better entry", not "chase".
+    c = e["close"]
+    rv = max(feats["rvol_20"] or float(np.log(c).diff().tail(60).std() * np.sqrt(252)) or 0.25, 0.05)  # floor: near-zero vol blows up the scaling
+
+    def _mom(long: int, skip: int = 21) -> float | None:
+        if len(c) <= long:
+            return None
+        r = float(c.iloc[-1 - skip] / c.iloc[-1 - long] - 1)
+        return r / (rv * np.sqrt((long - skip) / 252))
+
+    m12, m6 = _mom(252), _mom(126)
+    feats["mom_12_1"] = _f(m12)
+    feats["mom_6_1"] = _f(m6)
+    parts = [float(np.clip(m / 1.5, -1, 1)) for m in (m12, m6) if m is not None]
+    if not parts and feats["sma_50"] and feats["sma_200"]:
+        parts.append(float(np.clip((feats["sma_50"] / feats["sma_200"] - 1) * 10, -1, 1)))
+    direction = float(np.mean(parts)) if parts else 0.0
+
+    # stretch of the last week in units of its own expected move
+    stretch = 0.0
+    if feats["ret_5d"] is not None and rv > 0:
+        stretch = feats["ret_5d"] / (rv * np.sqrt(5 / 252))
+    feats["stretch_5d"] = round(stretch, 4)
+    chasing = np.sign(stretch) == np.sign(direction) and abs(stretch) > 1.5
+    feats["entry_timing"] = "extended: wait for pullback" if chasing else "counter-trend move: better entry on the trend side" if np.sign(stretch) == -np.sign(direction) and abs(stretch) > 1.0 else "neutral"
+    score = direction * (0.5 if chasing else 1.0)
+    feats["technical_score"] = round(float(np.clip(score, -1, 1)), 4)
     return feats

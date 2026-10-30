@@ -56,3 +56,31 @@ def test_indicators_are_causal():
     b = ind.enrich(df).iloc[199]
     for col in ["sma_50", "rsi_14", "macd", "atr_14", "kdj_k", "zscore_20"]:
         assert np.isclose(a[col], b[col]), col
+
+
+def _bars(close):
+    idx = pd.bdate_range("2023-01-02", periods=len(close))
+    c = pd.Series(close, index=idx, dtype=float)
+    return pd.DataFrame({"open": c, "high": c * 1.005, "low": c * 0.995, "close": c, "volume": 1e6})
+
+
+def test_technical_direction_ignores_the_latest_month():
+    """A spike in the last few weeks must not create a trend signal (that is chasing)."""
+    rng = np.random.default_rng(0)
+    flat = 100 * np.exp(np.cumsum(rng.normal(0, 0.01, 260)))
+    flat[-15:] = flat[-16] * np.linspace(1.0, 1.25, 15)  # +25% in three weeks
+    s = ind.snapshot(_bars(flat))
+    assert abs(s["mom_12_1"]) < 1.0  # the spike sits inside the skipped month
+    assert s["technical_score"] < 0.5
+
+
+def test_extended_move_in_trend_direction_halves_the_score():
+    rng = np.random.default_rng(1)
+    up = 100 * np.exp(np.cumsum(rng.normal(0.003, 0.012, 270)))  # year-long uptrend, ~19% vol
+    up[-5:] = up[-6] * np.exp(np.cumsum(np.full(5, 0.001)))  # quiet last week
+    calm = ind.snapshot(_bars(up))
+    spiked = up.copy()
+    spiked[-5:] = spiked[-6] * np.linspace(1.02, 1.12, 5)  # sharp last week
+    hot = ind.snapshot(_bars(spiked))
+    assert calm["technical_score"] > 0.5
+    assert hot["entry_timing"].startswith("extended") and hot["technical_score"] < calm["technical_score"]

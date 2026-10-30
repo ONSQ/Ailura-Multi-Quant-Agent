@@ -51,7 +51,7 @@ class AiluraConfig(BaseModel):
     max_position_fraction: float = 1.0
     allow_short: bool = False
     min_hold_days: int = 3  # don't cut/reverse a position this young unless |conviction| >= 0.6
-    trend_guard: bool = True  # cap long size while SMA50 < SMA200
+    trend_guard: bool = False  # opt-in: cap long size while SMA50 < SMA200 (adds lag at turns)
     downtrend_max_fraction: float = 0.5
     commission_bps: float = 1.0
     slippage_bps: float = 2.0
