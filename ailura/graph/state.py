@@ -22,6 +22,7 @@ class PortfolioContext(BaseModel):
     """What the trader/risk team knows about the book for this ticker."""
 
     current_weight: float = 0.0  # signed fraction of max allocation currently held
+    days_held: int = 0  # trading days since the current position was opened
     cash_fraction: float = 1.0
     max_position_fraction: float = 1.0
     allow_short: bool = False

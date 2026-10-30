@@ -50,12 +50,20 @@ class AiluraConfig(BaseModel):
     target_annual_vol: float = 0.20
     max_position_fraction: float = 1.0
     allow_short: bool = False
+    min_hold_days: int = 3  # don't cut/reverse a position this young unless |conviction| >= 0.6
+    trend_guard: bool = True  # cap long size while SMA50 < SMA200
+    downtrend_max_fraction: float = 0.5
     commission_bps: float = 1.0
     slippage_bps: float = 2.0
 
     # --- Paths -------------------------------------------------------------
     results_dir: Path = Path("./results")
     memory_path: Path | None = Path("./.ailura/memory.jsonl")  # None = in-memory only
+
+    # --- Evaluation ----------------------------------------------------------
+    # LLMs memorize historical prices; backtests on windows before this date are
+    # contaminated. The CLI warns when a real-LLM backtest starts before it.
+    llm_knowledge_cutoff: str | None = None
 
     @field_validator("max_debate_rounds", "max_risk_rounds", "memory_k", "holding_days", "lookback_days")
     @classmethod

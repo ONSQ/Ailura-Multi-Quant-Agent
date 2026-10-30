@@ -72,6 +72,7 @@ def backtest(
     llm: str = typer.Option(None),
     rebalance_every: int = typer.Option(1, help="run the agents every N trading days"),
     sizing: str = typer.Option("conviction", help="conviction | binary"),
+    execution: str = typer.Option("next_close", help="next_close (realistic: trade the day after the decision) | close"),
     with_baselines: bool = typer.Option(True, help="also run the paper's baselines"),
     out: Path = typer.Option(None, help="write results JSON here"),
 ) -> None:
@@ -84,11 +85,19 @@ def backtest(
 
     cfg = _config(provider, llm)
     s, e = date.fromisoformat(start), date.fromisoformat(end)
+    if cfg.llm_provider != "heuristic":
+        cutoff = date.fromisoformat(cfg.llm_knowledge_cutoff) if cfg.llm_knowledge_cutoff else None
+        if cutoff is None or s <= cutoff:
+            console.print(
+                "[bold red]warning:[/] LLMs memorize historical prices; a backtest window before the model's "
+                f"training cutoff ({cutoff or 'unknown: set AILURA_LLM_KNOWLEDGE_CUTOFF'}) overstates live accuracy. "
+                "Use a window that starts after the cutoff."
+            )
     graph = TradingGraph(cfg, memory=DecisionMemory(None))  # fresh in-memory lessons per backtest
     prices = normalize_ohlcv(graph.provider.get_ohlcv(ticker, s, e))
     if prices.empty:
         raise typer.BadParameter(f"no prices for {ticker} in {start}..{end}")
-    bt = Backtester(ExecutionConfig(commission_bps=cfg.commission_bps, slippage_bps=cfg.slippage_bps, allow_short=cfg.allow_short))
+    bt = Backtester(ExecutionConfig(commission_bps=cfg.commission_bps, slippage_bps=cfg.slippage_bps, allow_short=cfg.allow_short, execution=execution))
     results = []
     if with_baselines:
         # baselines get a warm-up window so indicators are defined on day one
@@ -100,10 +109,11 @@ def backtest(
                           on_decision=lambda st: console.print(f"[dim]{st.trade_date} {st.final_decision.action:<4} {st.final_decision.rating:<11} size {st.final_decision.position_fraction:+.2f}[/dim]"))
     results.append(bt.run(prices, strat.signals(prices), strat.name))
     console.print(rich_table(results, title=f"{ticker} {start} → {end}"))
+    console.print(f"decisions: {strat.diagnostics()}")
     console.print(f"memory: {graph.memory.stats()}")
     if out:
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps({"ticker": ticker, "start": start, "end": end, "results": [r.to_dict() for r in results], "decisions": strat.decisions}, indent=1, default=str))
+        out.write_text(json.dumps({"ticker": ticker, "start": start, "end": end, "results": [r.to_dict() for r in results], "diagnostics": strat.diagnostics(), "decisions": strat.decisions}, indent=1, default=str))
         console.print(f"wrote {out}")
 
 
@@ -113,6 +123,7 @@ def baselines(
     start: str = typer.Option(...),
     end: str = typer.Option(...),
     provider: str = typer.Option(None),
+    execution: str = typer.Option("next_close", help="next_close | close"),
 ) -> None:
     """Run only the paper's five baseline strategies."""
     from ailura.backtest import BASELINES, Backtester, ExecutionConfig
@@ -125,7 +136,7 @@ def baselines(
     prov = build_provider(cfg)
     prices = normalize_ohlcv(prov.get_ohlcv(ticker, s, e))
     warm = normalize_ohlcv(prov.get_ohlcv(ticker, s - timedelta(days=400), e))
-    bt = Backtester(ExecutionConfig(commission_bps=cfg.commission_bps, slippage_bps=cfg.slippage_bps))
+    bt = Backtester(ExecutionConfig(commission_bps=cfg.commission_bps, slippage_bps=cfg.slippage_bps, execution=execution))
     results = [bt.run(prices, strat.signals(warm).loc[prices.index], name) for name, strat in BASELINES.items()]
     console.print(rich_table(results, title=f"Baselines {ticker} {start} → {end}"))
 

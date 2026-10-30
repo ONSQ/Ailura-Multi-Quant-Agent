@@ -37,7 +37,7 @@ position limits, stop on the right side of price).
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"            # core: pydantic, pandas, numpy, typer, rich
-pytest                             # 35 offline, deterministic tests
+pytest                             # 0 offline, deterministic tests
 
 # One decision, fully offline (synthetic data + deterministic heuristic "LLM")
 ailura analyze AAPL --date 2024-03-01
@@ -83,8 +83,37 @@ All fields of `AiluraConfig` (`ailura/config.py`) can be set with
 | `max_risk_rounds` | 1 | aggressive/conservative/neutral rounds |
 | `holding_days` | 5 | window used to settle a decision and write a lesson |
 | `target_annual_vol` / `max_position_fraction` / `allow_short` | 0.20 / 1.0 / false | sizing limits handed to the trader and risk team |
+| `min_hold_days` | 3 | an open position isn't cut/reversed this soon unless \|conviction\| ≥ 0.6 |
+| `trend_guard` / `downtrend_max_fraction` | true / 0.5 | cap long size while SMA50 < SMA200 (caps size, never creates a signal) |
 | `commission_bps` / `slippage_bps` | 1 / 2 | backtest costs |
+| `llm_knowledge_cutoff` | unset | model training cutoff; real-LLM backtests starting before it get a warning |
 | `memory_path` | `.ailura/memory.jsonl` | decision log; `None` for in-memory |
+
+## Getting calls right: rules this repo enforces
+
+These come from replication studies of LLM trading agents (FINSABER
+arXiv:2505.07078, *Profit Mirage* arXiv:2510.07920, AlphaForgeBench
+arXiv:2602.18481) and from upstream TradingAgents issues (#203, #1170, #1466):
+
+* **HOLD keeps the position.** It is never an exit; close a long with
+  Underweight/Sell. (Treating HOLD as "go flat" made the book flip long↔cash
+  on tiny conviction changes.)
+* **Hysteresis outside the LLM.** LLM agents flip between adjacent decisions
+  even at temperature 0. A minimum holding period, a 5% rebalance band and a
+  trend guard are enforced in code (`apply_position_rules`); overrides are
+  tagged in the executive summary and counted in the backtest's `decisions:`
+  line, next to the BUY/HOLD/SELL base rates and position flips.
+* **Realistic fills.** `ailura backtest` executes on the next close by
+  default (`--execution close` for the paper's optimistic convention).
+* **No future fundamentals.** Yahoo fundamentals are present-day only and are
+  withheld for historical dates; live runs refresh a stale cache and ignore a
+  partial intraday bar.
+* **Inaction is reviewed.** The reflector grades a flat Hold that missed a >3%
+  move as incorrect, so memory doesn't teach the pipeline to sit in cash.
+* **Memorization.** A real LLM has seen the prices of any window before its
+  training cutoff, so backtest only after it (set `AILURA_LLM_KNOWLEDGE_CUTOFF`).
+  Judge any edge against Buy & Hold and the heuristic pipeline, net of costs,
+  over many tickers. Three months on three names proves nothing.
 
 ## Layout
 

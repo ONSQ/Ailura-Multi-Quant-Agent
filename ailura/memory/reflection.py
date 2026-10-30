@@ -14,7 +14,9 @@ SYSTEM = (
     "it is too short to judge. Cite the alpha figure, name the thesis component the window "
     "supports or undercuts, and give ONE concrete lesson (<= 40 words) that a future analyst "
     "can apply in a similar setup. Tag it with 2-4 short tags (e.g. 'uptrend', 'high-vol', "
-    "'earnings')."
+    "'earnings'). A Hold is judged too: if it kept a position, judge that position; if it was "
+    "flat and the stock moved more than ~3%, the Hold missed the move and is 'incorrect' (or "
+    "'correct' if it avoided a drop) - never let inaction escape review."
 )
 
 

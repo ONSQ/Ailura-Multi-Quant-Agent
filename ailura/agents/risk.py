@@ -78,7 +78,9 @@ class PortfolioManager(Agent[FinalDecision]):
         "a 5-tier rating, action, signed conviction, signed position fraction within limits, "
         "stop-loss / take-profit as absolute prices, a 2-3 sentence executive summary, the "
         "thesis, explicit invalidation triggers, and which past lessons you applied. Disagreement "
-        "is not a reason for inaction; balanced evidence is."
+        "is not a reason for inaction; balanced evidence is. HOLD means KEEP the current position "
+        "(portfolio.current_weight), not exit it: to close a long, rate Underweight or Sell. "
+        "Weigh the risk arguments on evidence, not on how many personas agree."
     )
 
     def build_context(self, state: TradingState) -> dict[str, Any]:

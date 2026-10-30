@@ -45,3 +45,23 @@ def test_csv_provider_roundtrip(tmp_path, provider):
     assert out.index.min().date() >= date(2024, 2, 1) and "close" in out.columns
     news = csv.get_news("AAPL", date(2024, 3, 1), 7)
     assert [n.headline for n in news] == ["x"]
+
+
+def test_yfinance_withholds_present_day_fundamentals_for_past_dates(tmp_path):
+    """Yahoo fundamentals are today's numbers; stamping them with a past date leaked the future."""
+    from ailura.data.yfinance_provider import YFinanceProvider
+
+    snap = YFinanceProvider(tmp_path).get_fundamentals("AAPL", date(2024, 3, 1))  # no network needed
+    assert snap.metrics == {} and "look-ahead" in snap.notes[0]
+
+
+def test_last_completed_session_skips_partial_and_weekend_bars():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from ailura.data.yfinance_provider import last_completed_session
+
+    ny = ZoneInfo("America/New_York")
+    assert last_completed_session(datetime(2026, 10, 30, 10, 0, tzinfo=ny)) == date(2026, 10, 29)  # Fri, intraday
+    assert last_completed_session(datetime(2026, 10, 30, 17, 0, tzinfo=ny)) == date(2026, 10, 30)  # Fri, after close
+    assert last_completed_session(datetime(2026, 11, 1, 12, 0, tzinfo=ny)) == date(2026, 10, 30)  # Sun

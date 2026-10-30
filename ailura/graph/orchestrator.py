@@ -46,34 +46,73 @@ def _tokens(*texts: str) -> set[str]:
 
 
 def sanitize_decision(d: FinalDecision, portfolio: PortfolioContext, close: float | None) -> FinalDecision:
-    """Enforce invariants the model may violate: action<->rating, limits, stop side."""
+    """Enforce invariants the model may violate: action<->rating, limits, stop side.
+
+    HOLD keeps the current position (``portfolio.current_weight``); it is not an exit.
+    Treating HOLD as "go flat" turned every neutral read into a liquidation and
+    made the book flip between long and cash on tiny conviction changes.
+    """
     action = rating_to_action(d.rating)
     frac = d.position_fraction
     if action == "HOLD":
-        frac = 0.0
+        frac = portfolio.current_weight
     elif action == "BUY":
         frac = abs(frac)
     else:
         frac = -abs(frac)
     if not portfolio.allow_short and frac < 0:
         frac = 0.0
-        action = "HOLD"
     frac = max(-portfolio.max_position_fraction, min(portfolio.max_position_fraction, frac))
+    # conviction must agree in sign with the rating
+    conv = d.conviction
+    if action == "BUY":
+        conv = abs(conv)
+    elif action == "SELL":
+        conv = -abs(conv)
     stop, tp = d.stop_loss, d.take_profit
     if close is not None:
-        if action == "BUY":
+        side = "BUY" if frac > 0 else "SELL" if frac < 0 else "FLAT"
+        if side == "BUY":
             if stop is not None and stop >= close:
                 stop = None
             if tp is not None and tp <= close:
                 tp = None
-        elif action == "SELL":
+        elif side == "SELL":
             if stop is not None and stop <= close:
                 stop = None
             if tp is not None and tp >= close:
                 tp = None
         else:
             stop = tp = None
-    return d.model_copy(update={"action": action, "position_fraction": round(frac, 4), "stop_loss": stop, "take_profit": tp})
+    return d.model_copy(update={"action": action, "conviction": round(conv, 4), "position_fraction": round(frac, 4), "stop_loss": stop, "take_profit": tp})
+
+
+def apply_position_rules(d: FinalDecision, portfolio: PortfolioContext, features: dict, config: AiluraConfig) -> FinalDecision:
+    """Deterministic guardrails applied outside the LLM.
+
+    * minimum holding period: an open position is not cut or reversed within
+      ``min_hold_days`` unless the call is a strong Sell/Buy (|conviction| >= 0.6);
+    * trend guard: long size is capped at ``downtrend_max_fraction`` while the
+      50-day SMA is below the 200-day SMA (the guard caps size, it never creates
+      a signal).
+
+    LLM agents flip between adjacent decisions and are too aggressive in bear
+    markets; both rules are cheap, auditable fixes for that.
+    """
+    frac = d.position_fraction
+    cur = portfolio.current_weight
+    notes: list[str] = []
+    reduces = cur != 0.0 and (frac * cur < 0 or abs(frac) < abs(cur) - 1e-9)
+    if reduces and portfolio.days_held < config.min_hold_days and abs(d.conviction) < 0.6:
+        notes.append(f"min-hold: kept {cur:+.2f} (held {portfolio.days_held}d < {config.min_hold_days}d)")
+        d = d.model_copy(update={"rating": "Hold", "action": "HOLD"})
+        frac = cur
+    if config.trend_guard and frac > config.downtrend_max_fraction and features.get("trend_regime") == "downtrend":
+        notes.append(f"trend-guard: long capped {frac:+.2f} -> {config.downtrend_max_fraction:+.2f} in downtrend")
+        frac = config.downtrend_max_fraction
+    if not notes:
+        return d
+    return d.model_copy(update={"position_fraction": round(frac, 4), "executive_summary": f"{d.executive_summary} [{'; '.join(notes)}]"})
 
 
 class TradingGraph:
@@ -204,7 +243,8 @@ class TradingGraph:
         self._step("risk_debate", state, t)
         t = time.perf_counter()
         raw = self.portfolio_manager.run(state)
-        state.final_decision = sanitize_decision(raw, state.portfolio, state.close)
+        fd = sanitize_decision(raw, state.portfolio, state.close)
+        state.final_decision = apply_position_rules(fd, state.portfolio, state.features, self.config)
         self._step("portfolio_manager", state, t)
         state.timings["total"] = round(time.perf_counter() - t0, 4)
 

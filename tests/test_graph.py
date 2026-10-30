@@ -91,8 +91,54 @@ def test_sanitize_decision_enforces_invariants():
     d = sanitize_decision(raw, pf, close=100.0)
     assert d.action == "BUY" and d.position_fraction == 0.5 and d.stop_loss is None and d.take_profit is None
     raw2 = FinalDecision(rating="Sell", action="SELL", conviction=-0.8, position_fraction=-0.9, executive_summary="s", thesis="t")
-    assert sanitize_decision(raw2, pf, 100.0).action == "HOLD"
+    long_only_sell = sanitize_decision(raw2, pf, 100.0)
+    assert long_only_sell.action == "SELL" and long_only_sell.position_fraction == 0.0  # long-only Sell = exit
     assert sanitize_decision(raw2, PortfolioContext(allow_short=True), 100.0).position_fraction == -0.9
+    # conviction sign is forced to agree with the rating
+    raw3 = FinalDecision(rating="Buy", action="BUY", conviction=-0.3, position_fraction=0.4, executive_summary="s", thesis="t")
+    assert sanitize_decision(raw3, pf, 100.0).conviction == 0.3
+
+
+def test_hold_keeps_current_position():
+    """HOLD must never liquidate: it keeps whatever is held."""
+    raw = FinalDecision(rating="Hold", action="HOLD", conviction=0.05, position_fraction=0.0, executive_summary="s", thesis="t")
+    d = sanitize_decision(raw, PortfolioContext(current_weight=0.7), 100.0)
+    assert d.action == "HOLD" and d.position_fraction == 0.7
+    assert sanitize_decision(raw, PortfolioContext(current_weight=0.0), 100.0).position_fraction == 0.0
+
+
+def test_min_hold_blocks_weak_exit_but_not_strong_sell(config):
+    from ailura.graph.orchestrator import apply_position_rules
+
+    pf = PortfolioContext(current_weight=0.8, days_held=1)
+    weak = FinalDecision(rating="Underweight", action="SELL", conviction=-0.3, position_fraction=0.0, executive_summary="s", thesis="t")
+    d = apply_position_rules(weak, pf, {"trend_regime": "uptrend"}, config)
+    assert d.action == "HOLD" and d.position_fraction == 0.8 and "min-hold" in d.executive_summary
+    strong = weak.model_copy(update={"rating": "Sell", "conviction": -0.7})
+    assert apply_position_rules(strong, pf, {"trend_regime": "uptrend"}, config).position_fraction == 0.0
+    aged = PortfolioContext(current_weight=0.8, days_held=config.min_hold_days)
+    assert apply_position_rules(weak, aged, {"trend_regime": "uptrend"}, config).position_fraction == 0.0
+
+
+def test_trend_guard_caps_longs_in_downtrend(config):
+    from ailura.graph.orchestrator import apply_position_rules
+
+    buy = FinalDecision(rating="Buy", action="BUY", conviction=0.8, position_fraction=0.9, executive_summary="s", thesis="t")
+    d = apply_position_rules(buy, PortfolioContext(), {"trend_regime": "downtrend"}, config)
+    assert d.position_fraction == config.downtrend_max_fraction
+    assert apply_position_rules(buy, PortfolioContext(), {"trend_regime": "uptrend"}, config).position_fraction == 0.9
+    off = config.model_copy(update={"trend_guard": False})
+    assert apply_position_rules(buy, PortfolioContext(), {"trend_regime": "downtrend"}, off).position_fraction == 0.9
+
+
+def test_flat_hold_that_misses_a_rally_is_reviewed():
+    from ailura.llm.heuristic import HeuristicLLM
+
+    llm = HeuristicLLM()
+    missed = llm.reflector({"rating": "Hold", "position_fraction": 0.0, "outcome": {"raw_return": 0.06, "alpha": 0.04}})
+    assert missed.verdict == "incorrect"
+    held = llm.reflector({"rating": "Hold", "position_fraction": 0.5, "outcome": {"raw_return": 0.06, "alpha": 0.04}})
+    assert held.verdict == "correct"
 
 
 def test_structured_output_failure_is_loud(config, provider, a_date):

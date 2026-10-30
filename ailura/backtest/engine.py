@@ -22,7 +22,7 @@ class ExecutionConfig:
     commission_bps: float = 1.0
     slippage_bps: float = 2.0
     execution: str = "close"  # "close" | "next_close"
-    rebalance_threshold: float = 0.02  # ignore weight changes smaller than this (reduces churn)
+    rebalance_threshold: float = 0.05  # ignore weight changes smaller than this (vol-scaled sizes drift daily)
     max_weight: float = 1.0
     allow_short: bool = False
 

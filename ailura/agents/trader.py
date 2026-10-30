@@ -18,7 +18,8 @@ class Trader(Agent[TraderProposal]):
         "conviction, entry price, stop-loss and take-profit as ABSOLUTE prices in the quote "
         "currency (use ATR and the 60-day support/resistance levels), a signed position "
         "fraction of the maximum allocation, and a holding horizon in trading days. Respect the "
-        "portfolio limits given. Stop-loss must be below entry for longs and above for shorts."
+        "portfolio limits given. Stop-loss must be below entry for longs and above for shorts. "
+        "HOLD keeps portfolio.current_weight unchanged; it is not an exit."
     )
 
     def build_context(self, state: TradingState) -> dict[str, Any]:

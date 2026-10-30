@@ -203,7 +203,8 @@ class HeuristicLLM:
             den += w
         conviction = _clip(num / den if den else 0.0)
         # apply lessons: shrink conviction when past calls in a similar setup were wrong
-        wrong = [m for m in (c.get("past_lessons") or []) if m.get("verdict") == "incorrect"]
+        # missed-move lessons from flat Holds argue for acting, not for shrinking
+        wrong = [m for m in (c.get("past_lessons") or []) if m.get("verdict") == "incorrect" and m.get("rating") != "Hold"]
         if wrong:
             conviction *= 0.8 ** min(len(wrong), 3)
         bull = [a for a in (c.get("debate") or []) if a["side"] == "bull"]
@@ -233,7 +234,7 @@ class HeuristicLLM:
         if not pf.get("allow_short", False):
             frac = max(0.0, frac)
         if action == "HOLD":
-            frac = 0.0
+            frac = float(pf.get("current_weight", 0.0))  # HOLD keeps the position
         long = action == "BUY"
         stop = tp = None
         if close and atr:
@@ -288,7 +289,7 @@ class HeuristicLLM:
         rating = conviction_to_rating(conv)
         action = rating_to_action(rating)
         if action == "HOLD":
-            frac = 0.0
+            frac = float(pf.get("current_weight", 0.0))  # HOLD keeps the position
         cons = recs.get("conservative", {})
         stop = cons.get("recommended_stop_loss") if f.get("vol_regime") == "high" else prop.get("stop_loss")
         lessons = [m.get("lesson", "") for m in (c.get("past_lessons") or [])][:3]
@@ -306,17 +307,21 @@ class HeuristicLLM:
         out = c.get("outcome") or {}
         alpha = float(out.get("alpha", 0.0))
         rating = c.get("rating", "Hold")
-        directional = rating in ("Buy", "Overweight", "Sell", "Underweight")
-        expected = 1 if rating in ("Buy", "Overweight") else -1 if rating in ("Sell", "Underweight") else 0
-        if not directional:
-            verdict = "inconclusive"
+        raw = float(out.get("raw_return", 0.0))
+        pos = float(c.get("position_fraction") or 0.0)
+        expected = 1 if rating in ("Buy", "Overweight") else -1 if rating in ("Sell", "Underweight") else int(np.sign(pos))
+        if expected == 0:
+            # a flat Hold is judged on opportunity cost, otherwise the memory only ever
+            # punishes action and the pipeline learns to sit in cash through rallies
+            verdict = "inconclusive" if abs(raw) < 0.03 else "incorrect" if raw > 0 else "correct"
         elif abs(alpha) < 0.005:
             verdict = "inconclusive"
         else:
             verdict = "correct" if np.sign(alpha) == expected else "incorrect"
         hd = c.get("holding_days", 5)
         lesson = (
-            f"{rating} calls in this setup earned {alpha:+.1%} alpha over {hd} days; keep sizing." if verdict == "correct"
+            f"Flat Hold missed a {raw:+.1%} move over {hd} days; act on moderate conviction in this setup." if verdict == "incorrect" and expected == 0
+            else f"{rating} calls in this setup earned {alpha:+.1%} alpha over {hd} days; keep sizing." if verdict == "correct"
             else f"{rating} in this setup lost {alpha:+.1%} alpha over {hd} days; require confirmation before sizing up." if verdict == "incorrect"
             else f"{hd}-day window ({alpha:+.1%} alpha) too small to judge; extend horizon before drawing conclusions."
         )
