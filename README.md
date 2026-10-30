@@ -37,7 +37,7 @@ position limits, stop on the right side of price).
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"            # core: pydantic, pandas, numpy, typer, rich
-pytest                             # 0 offline, deterministic tests
+pytest                             # 41 offline, deterministic tests
 
 # One decision, fully offline (synthetic data + deterministic heuristic "LLM")
 ailura analyze AAPL --date 2024-03-01
